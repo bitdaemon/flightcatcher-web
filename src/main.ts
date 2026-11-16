@@ -63,6 +63,7 @@ export class App {
       radial: (cs, x, y) => this.openRadial(cs, x, y),
       heading: (cs, deg, invert) => this.pickHeading(cs, deg, invert),
       direct: (cs, fix) => this.pickRouteFix(cs, fix),
+      crossFix: (cs, fix) => this.openCrossAltitude(cs, fix),
       cancelMode: () => this.endMode(),
     });
     this.runwayMap = new RunwayMap($<HTMLCanvasElement>("runway-canvas"));
@@ -386,6 +387,7 @@ export class App {
       items.push({ t: "ALT", f: () => this.openAltitude(cs, cx, cy) });
       items.push({ t: "SPD", f: () => this.openSpeed(cs, cx, cy) });
       items.push({ t: "DCT", f: () => this.beginDirect(cs) });
+      items.push({ t: "XNG", f: () => this.beginCross(cs), off: this.crossCandidates(ac).length === 0 });
       if (ac.departure) items.push({ t: "EXIT", f: cmd({ k: "direct", fix: "EXIT" }), off: !ac.departure.exitFix });
       else items.push({ t: "APP", f: () => this.openApproach(cs, cx, cy) });
       items.push({ t: "HO", f: cmd({ k: "handoff" }), off: commandRefusal({ k: "handoff" }, ac) !== null });
@@ -512,6 +514,44 @@ export class App {
     this.closeRadial();
     this.scope.mode = { kind: "heading", callsign: cs };
     this.notice(`${cs}: point and click a heading (Alt-click turns the long way), Esc cancels`, 6000);
+  }
+
+  /** Fixes a crossing restriction can go on: the route in the chips if there is one, otherwise the aircraft's own route. */
+  private crossCandidates(ac: { callsign: string; route: { id: string }[]; routeIndex: number }): string[] {
+    const list = this.chips && this.chips.callsign === ac.callsign ? this.chips.commands : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const c = list[i];
+      if (c.k === "direct") return [c.fix];
+      if (c.k === "route") return c.fixes;
+    }
+    return ac.route.slice(ac.routeIndex).map((p) => p.id);
+  }
+
+  private beginCross(cs: string): void {
+    const ac = this.sim?.aircraft.find((a) => a.callsign === cs);
+    if (!ac) return;
+    const candidates = this.crossCandidates(ac);
+    this.closeRadial();
+    if (candidates.length === 0) { this.notice(`${cs} has no route to put a crossing on`, 4000); return; }
+    this.scope.mode = { kind: "cross", callsign: cs, candidates };
+    this.notice(`${cs}: click a highlighted fix to cross at an altitude, Esc cancels`, 12000);
+  }
+
+  private openCrossAltitude(cs: string, fix: string): void {
+    const ac = this.sim?.aircraft.find((a) => a.callsign === cs);
+    if (!ac || !this.airport) return;
+    const ta = this.airport.transitionAltitudeFt;
+    const ceiling = Math.min(ac.type?.ceilingFt ?? 41000, ac.departure ? 41000 : Math.max(this.settings.areaCeilingFt, 15000));
+    const floor = ac.effectiveLevelFloorFt;
+    const p = this.scope.screenOf(ac);
+    this.endMode();
+    this.openPicker(`${cs} CROSS ${fix}`, p.x, p.y, (el) => {
+      for (let ft = Math.floor(ceiling / 1000) * 1000; ft >= Math.ceil(floor / 1000) * 1000; ft -= 1000) {
+        const label = ft > ta ? `FL${pad3(ft / 100)}` : `${ft} ft`;
+        this.pickerButton(el, label, () => this.addChip(cs, { k: "cross", fix, altitudeFt: ft }),
+          Math.abs(ft - ac.altitudeFt) < 500 ? "cur" : "");
+      }
+    });
   }
 
   private beginDirect(cs: string): void {

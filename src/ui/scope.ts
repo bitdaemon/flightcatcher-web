@@ -11,13 +11,15 @@ import type { Layers } from "../data/settings";
 export type PickMode =
   | { kind: "none" }
   | { kind: "heading"; callsign: string }
-  | { kind: "direct"; callsign: string };
+  | { kind: "direct"; callsign: string }
+  | { kind: "cross"; callsign: string; candidates: string[] };
 
 export interface ScopeCallbacks {
   select(callsign: string | null): void;
   radial(callsign: string, x: number, y: number): void;
   heading(callsign: string, degrees: number, invertTurn: boolean): void;
   direct(callsign: string, fix: string): void;
+  crossFix(callsign: string, fix: string): void;
   cancelMode(): void;
 }
 
@@ -131,10 +133,11 @@ export class Scope {
     return null;
   }
 
-  nearestFix(p: Pt, maxPx = 40): string | null {
+  nearestFix(p: Pt, maxPx = 40, only?: string[]): string | null {
     let best: string | null = null;
     let bestD = maxPx;
     for (const [id, q] of this.fixScreen) {
+      if (only && !only.includes(id)) continue;
       const d = Math.hypot(q.x - p.x, q.y - p.y);
       if (d < bestD) { bestD = d; best = id; }
     }
@@ -261,6 +264,12 @@ export class Scope {
       else this.cb.cancelMode();
       return;
     }
+    if (m.kind === "cross") {
+      const fix = this.nearestFix(p, 40, m.candidates);
+      if (fix) this.cb.crossFix(m.callsign, fix);
+      else this.cb.cancelMode();
+      return;
+    }
     this.cb.select(this.aircraftAt(p));
   }
 
@@ -338,15 +347,17 @@ export class Scope {
       }
       ctx.stroke();
     }
-    const directMode = this.mode.kind === "direct";
-    const hoverFix = directMode && this.hover ? this.nearestFix(this.hover) : null;
+    const directMode = this.mode.kind === "direct" || this.mode.kind === "cross";
+    const only = this.mode.kind === "cross" ? this.mode.candidates : undefined;
+    const hoverFix = directMode && this.hover ? this.nearestFix(this.hover, 40, only) : null;
     if (layers.fix || directMode) {
       ctx.font = `9px ${FONT}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
       for (const [id, q] of this.fixScreen) {
         if (q.x < -50 || q.y < -50 || q.x > this.w + 50 || q.y > this.h + 50) continue;
-        const on = onProc.has(id);
+        const on = onProc.has(id) || (only?.includes(id) ?? false);
+        if (only && !only.includes(id)) continue;
         const isHover = id === hoverFix;
         const col = isHover ? colors.selected : on ? colors.fix : alpha(colors.fix, 0.55);
         ctx.strokeStyle = col;
