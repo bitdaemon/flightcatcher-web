@@ -449,6 +449,7 @@ export class App {
     const current = round(ac.altitudeFt / 1000) * 1000;
     const plan = ac.departure?.expectedLevelFt;
     this.openPicker(`${cs} ALTITUDE`, x, y, (el) => {
+      this.expediteToggle(el);
       for (let ft = Math.floor(ceiling / 1000) * 1000; ft >= floor; ft -= 1000) {
         if (Math.abs(ft - ac.altitudeFt) < 50) continue;
         const label = ft > ta ? `FL${pad3(ft / 100)}` : `${ft} ft`;
@@ -467,6 +468,7 @@ export class App {
     const t = ac.type;
     const lo = t?.minSpeedKt ?? 120, hi = Math.min(t?.maxSpeedKt ?? 350, 300);
     this.openPicker(`${cs} SPEED`, x, y, (el) => {
+      this.expediteToggle(el);
       for (let k = Math.floor(hi / 10) * 10; k >= Math.ceil(lo / 10) * 10; k -= 10) {
         this.pickerButton(el, `${k} kt`, () => {
           this.addChip(cs, { k: "speed", knots: k });
@@ -512,8 +514,9 @@ export class App {
 
   private beginHeading(cs: string): void {
     this.closeRadial();
+    this.expedite = false;
     this.scope.mode = { kind: "heading", callsign: cs };
-    this.notice(`${cs}: point and click a heading (Alt-click turns the long way), Esc cancels`, 6000);
+    this.notice(`${cs}: point and click a heading (Alt-click turns the long way, Shift-click or E expedites), Esc cancels`, 8000);
   }
 
   /** Fixes a crossing restriction can go on: the route in the chips if there is one, otherwise the aircraft's own route. */
@@ -568,9 +571,24 @@ export class App {
   private pendingRoute: string[] = [];
 
   /** Collects a command as a chip if the aircraft would accept it; a second one of the same kind replaces the first. */
-  addChip(cs: string, c: Command): void {
+  /** Expedite for the next heading, altitude or speed chip: the toggle in the pickers, the E key, or Shift while picking. */
+  expedite = false;
+  private shiftHeld = false;
+
+  private expediteToggle(el: HTMLElement): void {
+    const b = document.createElement("button");
+    const paint = () => { b.textContent = `EXPEDITE  ${this.expedite ? "ON" : "off"}`; b.className = this.expedite ? "cur" : "sub"; };
+    paint();
+    b.addEventListener("click", (e) => { e.stopPropagation(); this.expedite = !this.expedite; paint(); });
+    el.appendChild(b);
+  }
+
+  addChip(cs: string, original: Command): void {
     const ac = this.sim?.aircraft.find((a) => a.callsign === cs);
     if (!ac) return;
+    let c = original;
+    if ((this.expedite || this.shiftHeld) && (c.k === "descend" || c.k === "climb" || c.k === "heading" || c.k === "speed")) c = { k: "expedite", inner: c };
+    this.expedite = false;
     const reason = commandRefusal(c, ac);
     if (reason) { this.notice(`${cs}: unable, ${reason}`, 4000); return; }
     if (!this.chips || this.chips.callsign !== cs) this.chips = { callsign: cs, commands: [] };
@@ -718,6 +736,7 @@ export class App {
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA" || document.querySelector("dialog[open]")) return;
       if (e.key === " ") { e.preventDefault(); this.toggleRun(); }
+      else if ((e.key === "e" || e.key === "E") && this.scope.mode.kind === "heading") { this.expedite = !this.expedite; this.notice(`Expedite ${this.expedite ? "on" : "off"} for this heading`, 2000); }
       else if (e.key === "Enter") {
         if (this.scope.mode.kind === "direct") { e.preventDefault(); this.commitRoute(this.scope.mode.callsign); }
         else if (this.chips) { e.preventDefault(); this.sendChips(); }
@@ -735,6 +754,7 @@ export class App {
       }
     });
 
+    for (const ev of ["pointerdown", "pointerup", "click"]) document.addEventListener(ev, (e) => { this.shiftHeld = (e as MouseEvent).shiftKey; }, true);
     $("stage").addEventListener("pointerdown", (e) => {
       if (!(e.target as HTMLElement).closest(".radial, .picker, .chips")) this.closeRadial();
     }, true);
