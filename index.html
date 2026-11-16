@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#080B0A" />
+    <meta name="description" content="flightcATCher: a 2D radar approach and departure control game. A game, not a simulator." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <title>flightcATCher</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <button id="btn-airport" class="airport-btn" title="Choose airport (A)"><span id="airport-title">Loading…</span></button>
+        <span id="clock" class="mono">00:00:00</span>
+        <button id="btn-run" class="tb" title="Pause / run (Space)">❚❚</button>
+        <label class="speed" title="Simulation speed">
+          <input id="speed" type="range" min="1" max="20" step="1" value="1" />
+          <span id="speed-label" class="mono">1x</span>
+        </label>
+        <span class="sep"></span>
+        <button class="tb" id="zoom-out" title="Zoom out (-)">−</button>
+        <button class="tb" id="zoom-in" title="Zoom in (+)">+</button>
+        <button class="tb" id="zoom-fit" title="Fit the approach area (Home)">FIT</button>
+        <span class="sep"></span>
+        <button class="tb toggle" id="layer-star" data-layer="star" title="Show STARs">STAR</button>
+        <button class="tb toggle" id="layer-sid" data-layer="sid" title="Show SIDs">SID</button>
+        <button class="tb toggle" id="layer-app" data-layer="app" title="Show approaches">APP</button>
+        <button class="tb toggle" id="layer-fix" data-layer="fix" title="Show fixes">FIX</button>
+        <span class="sep"></span>
+        <button class="tb toggle" id="panel-strips" data-panel="strips" title="Aircraft strips">ACFT</button>
+        <button class="tb toggle" id="panel-radio" data-panel="radio" title="Radio log">RADIO</button>
+        <button class="tb toggle" id="panel-info" data-panel="info" title="Airport info">INFO</button>
+        <button class="tb toggle" id="panel-runways" data-panel="runways" title="Runway view">RWY</button>
+        <button class="tb" id="btn-macros" title="Macros for this airport">MACROS</button>
+        <span class="grow"></span>
+        <span id="score-chip" class="mono score-chip" title="Score">SCORE 0</span>
+        <button class="tb" id="btn-help" title="Commands and scoring (?)">?</button>
+        <button class="tb" id="btn-settings" title="Settings">⚙</button>
+        <button class="tb end" id="btn-end" title="End the session and see the debrief">END</button>
+      </header>
+
+      <main id="stage">
+        <canvas id="scope"></canvas>
+        <div id="notice" class="notice hidden"></div>
+        <div id="radial" class="radial hidden"></div>
+        <div id="picker" class="picker hidden"></div>
+
+        <section id="strips" class="panel left top">
+          <h2>Aircraft <span id="strip-count" class="dim"></span></h2>
+          <div class="panel-body" id="strip-list"></div>
+        </section>
+
+        <section id="runways" class="panel left bottom">
+          <h2>Runways <span class="dim legend"><i style="--c:#4DCC6B"></i>free <i style="--c:#FFD140"></i>approach <i style="--c:#F2524D"></i>in use</span></h2>
+          <div class="panel-body canvas-body"><canvas id="runway-canvas"></canvas></div>
+        </section>
+
+        <section id="info" class="panel right top">
+          <h2>Airport info</h2>
+          <div class="panel-body" id="info-body"></div>
+        </section>
+
+        <section id="radio" class="panel right bottom">
+          <h2>Radio</h2>
+          <div class="panel-body" id="radio-list"></div>
+        </section>
+      </main>
+
+      <footer id="cmdbar">
+        <div id="chips" class="chips"></div>
+        <input id="cmd" class="mono" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+               placeholder="callsign and codes, e.g. aal123 d70 s180 h270l   (Tab completes, Enter sends)" />
+        <button id="cmd-send" class="tb">Send</button>
+        <div id="cmd-preview" class="preview mono"></div>
+      </footer>
+    </div>
+
+    <dialog id="dlg-airport" class="dlg"></dialog>
+    <dialog id="dlg-settings" class="dlg"></dialog>
+    <dialog id="dlg-help" class="dlg"></dialog>
+    <dialog id="dlg-debrief" class="dlg"></dialog>
+    <dialog id="dlg-about" class="dlg"></dialog>
+    <dialog id="dlg-macros" class="dlg wide"></dialog>
+    <div id="update-toast" class="toast hidden"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

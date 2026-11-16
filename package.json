@@ -1,0 +1,21 @@
+{
+  "name": "flightcatcher-web",
+  "version": "0.1.0",
+  "scripts": {
+    "data": "node scripts/prepare-data.mjs",
+    "dev": "node scripts/prepare-data.mjs && vite",
+    "build": "node scripts/prepare-data.mjs && tsc -p . && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.1.0"
+  },
+  "private": true,
+  "type": "module"
+}

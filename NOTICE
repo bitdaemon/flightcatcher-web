@@ -1,0 +1,13 @@
+flightcATCher
+Copyright 2026 Richard T.
+
+This product is the original work of Richard T. (https://github.com/bitdaemon/flightcatcher).
+
+Redistributions of this software or of works derived from it must keep this
+NOTICE file and credit Richard T. as the original author, as required by
+section 4(d) of the Apache License, Version 2.0.
+
+This product includes data derived from:
+- FAA Coded Instrument Flight Procedures (CIFP), U.S. Federal Aviation Administration
+- OurAirports (https://ourairports.com), public domain
+See DATA-SOURCES.md for details.
