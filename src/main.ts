@@ -1,7 +1,7 @@
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
 import { airportTitle, approachJoins, referenceProjection, type AirportIndexEntry, type AirportPackage, type ApproachJoin, type LocalPoint } from "./sim/airport";
-import { chipLabel, commandCode, commandRefusal, type Command, type IssuedCommand } from "./sim/command";
+import { chipLabel, commandCode, commandRefusal, commandSlot, type Command, type IssuedCommand } from "./sim/command";
 import { evaluate, newTabState, runwayChoices, tabComplete } from "./sim/commandBar";
 import { setNumberStyle } from "./sim/phraseology";
 import { randomSeed } from "./sim/rng";
@@ -62,7 +62,7 @@ export class App {
       select: (cs) => this.select(cs),
       radial: (cs, x, y) => this.openRadial(cs, x, y),
       heading: (cs, deg, invert) => this.pickHeading(cs, deg, invert),
-      direct: (cs, fix) => { this.endMode(); this.send([{ callsign: cs, command: { k: "direct", fix } }]); },
+      direct: (cs, fix) => this.pickRouteFix(cs, fix),
       cancelMode: () => this.endMode(),
     });
     this.runwayMap = new RunwayMap($<HTMLCanvasElement>("runway-canvas"));
@@ -219,6 +219,7 @@ export class App {
       this.lastPanelTime = t;
       this.renderPanels(false);
     }
+    if (this.chips) this.placeChips();
     requestAnimationFrame((x) => this.frame(x));
   }
 
@@ -327,7 +328,7 @@ export class App {
   private submitCommand(): void {
     const el = $<HTMLInputElement>("cmd");
     const input = el.value;
-    if (!input.trim()) return;
+    if (!input.trim()) { this.sendChips(); return; }
     const r = evaluate(input, this.evalContext());
     if (r.status === "ready" && r.macro) {
       const failed = r.macro.k === "run" ? this.runMacro(r.macro.name, r.macro.callsign) !== null : (this.cancelMacro(r.macro.callsign), false);
@@ -358,6 +359,7 @@ export class App {
     const sim = this.sim;
     const ac = sim?.aircraft.find((a) => a.callsign === cs);
     if (!sim || !ac) return;
+    if (this.chips && this.chips.callsign !== cs) { this.chips = null; this.renderChips(); }
     this.select(cs);
     const el = $("radial");
     el.innerHTML = "";
@@ -373,7 +375,7 @@ export class App {
     el.appendChild(label);
     type Item = { t: string; f: () => void; small?: boolean; off?: boolean };
     const items: Item[] = [];
-    const cmd = (c: Command) => () => { this.closeRadial(); this.send([{ callsign: cs, command: c }]); };
+    const cmd = (c: Command) => () => this.addChip(cs, c);
     if (ac.handedToTower) {
       items.push({ t: "TWR", f: () => this.closeRadial(), off: true });
     } else if (ac.isOnGround) {
@@ -450,8 +452,7 @@ export class App {
         const label = ft > ta ? `FL${pad3(ft / 100)}` : `${ft} ft`;
         const cls = [ft === round(ac.targetAltitudeFt / 1000) * 1000 ? "cur" : "", ft === plan ? "plan" : ""].join(" ").trim();
         this.pickerButton(el, (ft > ac.altitudeFt ? "↑ " : "↓ ") + label, () => {
-          this.closeRadial();
-          this.send([{ callsign: cs, command: ft > ac.altitudeFt ? { k: "climb", feet: ft } : { k: "descend", feet: ft } }]);
+          this.addChip(cs, ft > ac.altitudeFt ? { k: "climb", feet: ft } : { k: "descend", feet: ft });
         }, cls);
       }
       void current;
@@ -466,8 +467,7 @@ export class App {
     this.openPicker(`${cs} SPEED`, x, y, (el) => {
       for (let k = Math.floor(hi / 10) * 10; k >= Math.ceil(lo / 10) * 10; k -= 10) {
         this.pickerButton(el, `${k} kt`, () => {
-          this.closeRadial();
-          this.send([{ callsign: cs, command: { k: "speed", knots: k } }]);
+          this.addChip(cs, { k: "speed", knots: k });
         }, k === round(ac.targetSpeedKt / 10) * 10 ? "cur" : "");
       }
     });
@@ -481,13 +481,11 @@ export class App {
     this.openPicker(`${cs} APPROACH`, x, y, (el) => {
       for (const r of open) {
         this.pickerButton(el, `${r.ils ? "ILS" : "VIS"} ${r.id}`, () => {
-          this.closeRadial();
-          this.send([{ callsign: cs, command: { k: "approach", runway: r.id } }]);
+          this.addChip(cs, { k: "approach", runway: r.id });
         });
         for (const c of runwayChoices(ac, r.id, this.joins, this.fixPositions).slice(0, 3)) {
           this.pickerButton(el, `${c.onRoute ? "• " : ""}${c.join.procedure} ${round(c.distanceNM)} NM`, () => {
-            this.closeRadial();
-            this.send([{ callsign: cs, command: { k: "joinApproach", procedure: c.join.procedure, runway: c.join.runway, via: c.join.via } }]);
+            this.addChip(cs, { k: "joinApproach", procedure: c.join.procedure, runway: c.join.runway, via: c.join.via });
           }, "sub");
         }
       }
@@ -518,8 +516,109 @@ export class App {
 
   private beginDirect(cs: string): void {
     this.closeRadial();
+    this.pendingRoute = [];
+    this.scope.pendingRoute = this.pendingRoute;
     this.scope.mode = { kind: "direct", callsign: cs };
-    this.notice(`${cs}: click a fix to fly direct, Esc cancels`, 6000);
+    this.notice(`${cs}: click fixes in order, then click the last one again or press Enter. Esc cancels`, 12000);
+  }
+
+  // MARK: Chips (commands collected before they are sent)
+
+  chips: { callsign: string; commands: Command[] } | null = null;
+  private pendingRoute: string[] = [];
+
+  /** Collects a command as a chip if the aircraft would accept it; a second one of the same kind replaces the first. */
+  addChip(cs: string, c: Command): void {
+    const ac = this.sim?.aircraft.find((a) => a.callsign === cs);
+    if (!ac) return;
+    const reason = commandRefusal(c, ac);
+    if (reason) { this.notice(`${cs}: unable, ${reason}`, 4000); return; }
+    if (!this.chips || this.chips.callsign !== cs) this.chips = { callsign: cs, commands: [] };
+    const list = this.chips.commands;
+    const i = list.findIndex((x) => commandSlot(x) === commandSlot(c));
+    if (i >= 0) list[i] = c; else list.push(c);
+    this.endMode();
+    this.renderChips();
+    this.openRadial(cs, 0, 0);
+  }
+
+  private pickRouteFix(cs: string, fix: string): void {
+    if (this.pendingRoute[this.pendingRoute.length - 1] === fix) { this.commitRoute(cs); return; }
+    this.pendingRoute.push(fix);
+    this.scope.pendingRoute = this.pendingRoute;
+    this.notice(`${cs}: ${this.pendingRoute.join(" › ")}  (click the last fix again or press Enter to finish)`, 12000);
+  }
+
+  private commitRoute(cs: string): void {
+    const fixes = this.pendingRoute.slice();
+    this.clearPending();
+    if (fixes.length === 0) { this.endMode(); return; }
+    this.addChip(cs, fixes.length === 1 ? { k: "direct", fix: fixes[0] } : { k: "route", fixes });
+  }
+
+  private clearPending(): void {
+    this.pendingRoute = [];
+    this.scope.pendingRoute = this.pendingRoute;
+  }
+
+  sendChips(): void {
+    const ch = this.chips;
+    if (!ch || ch.commands.length === 0) return;
+    this.chips = null;
+    this.renderChips();
+    this.closeRadial();
+    this.send(ch.commands.map((command) => ({ callsign: ch.callsign, command })));
+  }
+
+  cancelChips(): void {
+    this.chips = null;
+    this.renderChips();
+  }
+
+  private renderChips(): void {
+    const el = $("chips");
+    const ch = this.chips;
+    if (!ch || ch.commands.length === 0) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+    el.innerHTML = `<div class="ph">${esc(ch.callsign)}</div>`;
+    ch.commands.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.className = "chip";
+      b.innerHTML = `<span>${esc(chipLabel(c))}</span><span class="x">\u2715</span>`;
+      b.title = "Click to remove";
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        ch.commands.splice(i, 1);
+        if (ch.commands.length === 0) this.chips = null;
+        this.renderChips();
+      });
+      el.appendChild(b);
+    });
+    const row = document.createElement("div");
+    row.className = "chiprow";
+    const send = document.createElement("button");
+    send.className = "send";
+    send.textContent = "SEND \u21B5";
+    send.addEventListener("click", (e) => { e.stopPropagation(); this.sendChips(); });
+    const cancel = document.createElement("button");
+    cancel.textContent = "CANCEL";
+    cancel.addEventListener("click", (e) => { e.stopPropagation(); this.cancelChips(); });
+    row.append(send, cancel);
+    el.appendChild(row);
+    el.classList.remove("hidden");
+    this.placeChips();
+  }
+
+  /** Keeps the chip strip beside its aircraft; drops it if the aircraft has gone. */
+  private placeChips(): void {
+    const ch = this.chips;
+    if (!ch) return;
+    const ac = this.sim?.aircraft.find((a) => a.callsign === ch.callsign);
+    if (!ac || ac.handedToTower) { this.chips = null; this.renderChips(); return; }
+    const el = $("chips");
+    const p = this.scope.screenOf(ac);
+    const size = this.scope.size;
+    el.style.left = Math.min(Math.max(8, p.x + 120), size.w - el.offsetWidth - 8) + "px";
+    el.style.top = Math.min(Math.max(8, p.y - el.offsetHeight / 2), size.h - el.offsetHeight - 8) + "px";
   }
 
   private pickHeading(cs: string, deg: number, invert: boolean): void {
@@ -532,11 +631,12 @@ export class App {
       if (d > 180) d -= 360; else if (d <= -180) d += 360;
       turn = d > 0 ? "left" : "right";
     }
-    this.send([{ callsign: cs, command: { k: "heading", degrees: deg, turn } }]);
+    this.addChip(cs, { k: "heading", degrees: deg, turn });
   }
 
   endMode(): void {
     this.scope.mode = { kind: "none" };
+    this.clearPending();
     const n = $("notice");
     if (n.textContent?.includes("Esc cancels")) n.classList.add("hidden");
   }
@@ -578,7 +678,14 @@ export class App {
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA" || document.querySelector("dialog[open]")) return;
       if (e.key === " ") { e.preventDefault(); this.toggleRun(); }
-      else if (e.key === "Escape") { this.endMode(); this.closeRadial(); this.select(null); }
+      else if (e.key === "Enter") {
+        if (this.scope.mode.kind === "direct") { e.preventDefault(); this.commitRoute(this.scope.mode.callsign); }
+        else if (this.chips) { e.preventDefault(); this.sendChips(); }
+      } else if (e.key === "Escape") {
+        if (this.scope.mode.kind === "direct" && this.pendingRoute.length) this.clearPending();
+        else if (this.scope.mode.kind === "none" && $("radial").classList.contains("hidden") && this.chips) this.cancelChips();
+        else { this.endMode(); this.closeRadial(); this.select(null); }
+      }
       else if (e.key === "+" || e.key === "=") this.scope.zoom(1.25);
       else if (e.key === "-" || e.key === "_") this.scope.zoom(0.8);
       else if (e.key === "?") openHelp(this);
@@ -589,7 +696,7 @@ export class App {
     });
 
     $("stage").addEventListener("pointerdown", (e) => {
-      if (!(e.target as HTMLElement).closest(".radial, .picker")) this.closeRadial();
+      if (!(e.target as HTMLElement).closest(".radial, .picker, .chips")) this.closeRadial();
     }, true);
 
     $("btn-run").addEventListener("click", () => this.toggleRun());

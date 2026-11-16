@@ -37,6 +37,8 @@ export class Scope {
   pan: Pt = { x: 0, y: 0 };
   pxPerNM = 8;
   mode: PickMode = { kind: "none" };
+  /** Fixes picked so far in direct mode, drawn as the route being built. */
+  pendingRoute: string[] = [];
   private hover: Pt | null = null;
   private tagOffsets = new Map<string, Pt>();
   private pinnedTags = new Set<string>();
@@ -474,6 +476,31 @@ export class Scope {
         ctx.textAlign = "left";
         ctx.textBaseline = "bottom";
         ctx.fillText(`HDG ${pad3(deg)} ${turn}`, this.hover.x + 12, this.hover.y - 6);
+      }
+    }
+
+    if (this.mode.kind === "direct" && this.pendingRoute.length) {
+      const m = this.mode;
+      const ac = sim.aircraft.find((a) => a.callsign === m.callsign);
+      const pts = this.pendingRoute.map((id) => ({ id, q: this.fixScreen.get(id) })).filter((x): x is { id: string; q: Pt } => !!x.q);
+      if (ac && pts.length) {
+        const a0 = this.toScreen(ac.eastNM, ac.northNM);
+        ctx.strokeStyle = colors.selected;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([8, 5]);
+        ctx.beginPath();
+        ctx.moveTo(a0.x, a0.y);
+        for (const x of pts) ctx.lineTo(x.q.x, x.q.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = `bold 11px ${FONT}`;
+        ctx.fillStyle = colors.selected;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        pts.forEach((x, i) => {
+          ctx.beginPath(); ctx.arc(x.q.x, x.q.y, 6, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillText(`${i + 1} ${x.id}`, x.q.x + 9, x.q.y - 6);
+        });
       }
     }
 

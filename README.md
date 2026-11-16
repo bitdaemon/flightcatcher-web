@@ -60,7 +60,7 @@ cleared to the runway, red while a departure is lined up or rolling or an arriva
 
 ### Not ported
 
-The test spawner and the debug log (on purpose), chip collection in the radial menu (each pick is sent at once), and
+The test spawner and the debug log (on purpose), and
 the Foundation Models radio voice (the browser's speech synthesis is offered instead). Live METAR wind works where the
 browser can reach `aviationweather.gov`; otherwise the wind drifts randomly, as in the Mac app when no observation can
 be had.
